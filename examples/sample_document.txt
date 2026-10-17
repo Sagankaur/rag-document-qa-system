@@ -1,0 +1,7 @@
+Northwind Community Library opens from 9:00 AM to 7:00 PM on weekdays and from 10:00 AM to 4:00 PM on Saturdays. It is closed on Sundays.
+
+Members may borrow up to five books at a time. The standard loan period is fourteen days. A loan can be renewed once when no other member has reserved the book.
+
+The library does not charge daily late fees. An account is paused when an item is more than twenty-one days overdue, and borrowing resumes after the item is returned or replaced.
+
+Study rooms can be reserved for two hours per day. Reservations must be cancelled at least one hour before the start time so another member can use the room.

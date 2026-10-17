@@ -2,7 +2,7 @@ import os
 import faiss
 import numpy as np
 import logging
-import google.generativeai as genai
+from google import genai
 from sentence_transformers import SentenceTransformer
 
 logger = logging.getLogger(__name__)
@@ -10,29 +10,45 @@ logger = logging.getLogger(__name__)
 class MinimalRAG:
     """A minimal Retrieval-Augmented Generation pipeline."""
     
-    def __init__(self, embedding_model=None, chunk_size=300, chunk_overlap=50):
+    def __init__(self, embedding_model=None, chunk_size=300, chunk_overlap=50, model_name=None):
+        if chunk_size <= 0:
+            raise ValueError("chunk_size must be greater than zero")
+        if chunk_overlap < 0 or chunk_overlap >= chunk_size:
+            raise ValueError("chunk_overlap must be non-negative and smaller than chunk_size")
+
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
         # We use a simple, fast open-source model for local embeddings
         self.embedding_model = embedding_model if embedding_model else SentenceTransformer('all-MiniLM-L6-v2')
         self.index = None
         self.chunks = []
-        self.llm = None
+        self.client = None
+        self.model_name = model_name or os.getenv("GEMINI_MODEL", "gemini-flash-latest")
         
         # Load env key if available at init
         api_key = os.getenv("GEMINI_API_KEY")
         if api_key:
             self.set_api_key(api_key)
 
-    def set_api_key(self, api_key: str):
+    @property
+    def generation_enabled(self) -> bool:
+        """Whether Gemini generation is configured for this instance."""
+        return self.client is not None
+
+    def set_api_key(self, api_key: str, model_name: str | None = None) -> bool:
         """Configure the Gemini API key safely."""
+        if not api_key or not api_key.strip():
+            self.client = None
+            return False
+
         try:
-            genai.configure(api_key=api_key)
-            self.llm = genai.GenerativeModel('gemini-1.5-flash')
+            self.client = genai.Client(api_key=api_key.strip())
+            if model_name:
+                self.model_name = model_name
             return True
         except Exception as e:
             logger.error(f"Error configuring Gemini API: {e}")
-            self.llm = None
+            self.client = None
             return False
 
     def chunk_text(self, text: str) -> list[str]:
@@ -70,12 +86,15 @@ class MinimalRAG:
         
     def retrieve(self, query: str, top_k: int = 3) -> list[tuple[str, float]]:
         """Retrieves top_k chunks relevant to the query along with their L2 distance scores."""
-        if not self.index or not self.chunks:
+        if self.index is None or not self.chunks or not query.strip():
             return []
             
         try:
             query_embedding = self.embedding_model.encode([query])
-            distances, indices = self.index.search(np.array(query_embedding).astype('float32'), top_k)
+            safe_top_k = max(1, min(top_k, len(self.chunks)))
+            distances, indices = self.index.search(
+                np.array(query_embedding).astype('float32'), safe_top_k
+            )
             
             results = []
             # faiss returns a matrix of indices and distances.
@@ -89,11 +108,18 @@ class MinimalRAG:
 
     def generate_answer(self, query: str, context_chunks: list[str]) -> str:
         """Generates an answer using Gemini, grounded in context."""
-        if not self.llm:
-            return "Error: Gemini API key is not configured or is invalid. Please set it in the sidebar."
-            
         if not context_chunks:
             return "I could not find relevant information in the uploaded documents."
+
+        if not self.client:
+            preview = context_chunks[0].strip()
+            if len(preview) > 600:
+                preview = preview[:597].rstrip() + "..."
+            return (
+                "Retrieval-only mode (no Gemini API key configured). "
+                "The closest passage is shown below; verify it against the evidence chunks.\n\n"
+                f"> {preview}"
+            )
             
         # Grounded prompt template
         context_str = "\n\n---\n\n".join([f"Chunk {i+1}:\n{chunk}" for i, chunk in enumerate(context_chunks)])
@@ -113,10 +139,12 @@ User Question: {query}
 Answer:"""
         
         try:
-            response = self.llm.generate_content(prompt)
-            # Gemini block check
-            if not response.parts:
-                 return "The model declined to answer. This may be due to safety filters."
+            response = self.client.models.generate_content(
+                model=self.model_name,
+                contents=prompt,
+            )
+            if not response.text:
+                return "The model returned no text. Review the retrieved evidence below."
             return response.text
         except Exception as e:
             logger.error(f"API Generation Error: {e}")

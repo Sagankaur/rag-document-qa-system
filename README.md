@@ -1,53 +1,90 @@
-# 📚 Document QA System (RAG)
+# Document QA System (RAG)
 
-An end-to-end Retrieval-Augmented Generation (RAG) application that allows users to upload PDF and TXT documents, and ask questions based **strictly** on the content of those documents. 
+A compact retrieval-augmented generation project for asking questions about local PDF and text files. The application keeps document parsing, chunking, embeddings, and FAISS retrieval local. A Gemini API key is optional: without one, the interface still works as a retrieval-only evidence explorer.
 
-Built as a clean, local-first mini-project for AI engineers and interns to showcase fundamental GenAI engineering concepts.
+## What it demonstrates
 
-## 🌟 Features
-- **Document Upload**: Supports uploading multiple `.txt` or `.pdf` files.
-- **Local Chunking & Embeddings**: Uses open-source `sentence-transformers` and `FAISS` to generate embeddings and retrieve chunks efficiently locally. No vector database cloud setup required.
-- **Grounded Generation**: Uses Gemini 1.5 Flash to generate answers grounded **only** in the retrieved document context. It actively avoids hallucination by citing chunk numbers and declining to answer if the context lacks the information.
-- **Explainability**: A built-in expander UI element reveals the exact text chunks the LLM retrieved and used to generate its answer.
+- Multi-file PDF and TXT ingestion
+- Configurable overlapping word chunks
+- Local `all-MiniLM-L6-v2` embeddings and an in-memory FAISS index
+- Top-k semantic retrieval with visible L2 distance scores
+- Grounded Gemini answers using the current Google Gen AI SDK
+- A no-key mode that returns the closest passage and exposes every retrieved chunk
 
-## 🏗️ Architecture
+## Request flow
 
-1. **Extraction**: `PyPDF2` (for PDF) and standard Python I/O (for TXT) extract raw text.
-2. **Chunking**: Text is split into fixed-size overlapping text chunks (e.g., 300 words, 50 word overlap) to preserve context.
-3. **Embedding**: `all-MiniLM-L6-v2` (SentenceTransformer) encodes chunks into high-dimensional vectors locally.
-4. **Vector Store**: `FAISS` creates a local in-memory L2 index of the chunk embeddings.
-5. **Retrieval**: User queries are embedded, and FAISS retrieves the top-K nearest neighbors (the most relevant chunks).
-6. **Generation**: The Gemini API receives a strict zero-shot prompt wrapped around the extracted chunks to generate the final answer.
+```text
+PDF/TXT -> text extraction -> overlapping chunks -> local embeddings -> FAISS
+                                                                    |
+question -> local query embedding -> top-k evidence ----------------+
+                                      |                         |
+                                      +-> retrieval-only answer +-> Gemini answer (optional)
+```
 
-## 🚀 Setup Instructions
+Documents and the vector index remain in the Streamlit process; they are not persisted by this project. When Gemini generation is enabled, only the question and retrieved text excerpts are sent to the configured Gemini model.
 
-1. **Prerequisites**: Python 3.9+ 
-2. **Clone the repository** (or download the files).
-3. **Install Dependencies**:
+## Quick start
+
+Prerequisites: Python 3.10+ and enough memory to load the sentence-transformer model.
+
 ```bash
+python -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
-```
-4. **Environment Variables**:
-Rename `.env.example` to `.env` and put in your Google Gemini API key:
-```env
-GEMINI_API_KEY="your_api_key_here"
-```
-*(You can get a free Gemini key from Google AI Studio).*
-
-## 💻 Usage
-
-Run the Streamlit application:
-```bash
 streamlit run app.py
 ```
 
-1. Open the local URL provided by Streamlit in your browser.
-2. Upload your documents in the left sidebar.
-3. Click **"Process Documents"**.
-4. Type your question in the main text box.
-5. Expand the "Show Retrieved Evidence Chunks" section to see the source information!
+Upload `examples/sample_document.txt` to try the project. Leave the API-key field empty for retrieval-only mode.
 
-## 🚧 Limitations & Future Improvements
-* **In-memory FAISS**: Currently, the index is lost upon restarting the server. A future improvement would be saving the `.index` file to disk for persistence.
-* **Naive Chunking**: Uses standard word-based chunking. Could be upgraded to semantic chunking or LangChain's RecursiveCharacterTextSplitter.
-* **PDF Parse Quality**: PyPDF2 struggles with complex tables/layouts. Pymupdf or OCR could be integrated for better extraction accuracy.
+To enable generated answers, copy `.env.example` to `.env`, add a Gemini API key, and optionally change the model alias:
+
+```env
+GEMINI_API_KEY="your-key"
+GEMINI_MODEL="gemini-flash-latest"
+```
+
+The model is configurable because model availability changes over time. The default alias follows the model naming shown in the [Google Gen AI SDK documentation](https://googleapis.github.io/python-genai/).
+
+## Docker
+
+Build and run from the repository root:
+
+```bash
+docker build -t document-qa .
+docker run --rm -p 8501:8501 document-qa
+```
+
+For Gemini generation, pass the key at runtime rather than baking it into the image:
+
+```bash
+docker run --rm -p 8501:8501 -e GEMINI_API_KEY -e GEMINI_MODEL document-qa
+```
+
+## Tests
+
+```bash
+pytest -q
+```
+
+The unit tests use a deterministic fake embedding model and do not call Gemini or download a transformer model.
+
+## Repository map
+
+| Path | Purpose |
+| --- | --- |
+| `app.py` | Streamlit interface and session state |
+| `rag_pipeline.py` | Chunking, FAISS retrieval, optional generation |
+| `utils.py` | PDF and text extraction |
+| `tests/` | Offline pipeline tests |
+| `examples/` | A small document for the no-key demo |
+
+## Current limitations
+
+- The FAISS index is in memory and disappears when the process restarts.
+- Word-count chunking can split tables, headings, or semantic units.
+- Scanned PDFs need OCR; `pypdf` only extracts embedded text.
+- L2 distance is displayed as a diagnostic, not a calibrated confidence score.
+- The extractive fallback surfaces the closest passage; it does not synthesize an answer.
+- API errors are shown to the user and are not retried automatically.
+
+Never commit `.env` or API keys. Uploaded documents can contain sensitive information, so review the excerpts before enabling a hosted model.

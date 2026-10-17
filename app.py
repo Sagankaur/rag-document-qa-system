@@ -47,6 +47,11 @@ with st.sidebar:
         value=os.getenv("GEMINI_API_KEY", ""),
         help="Get your key from Google AI Studio"
     )
+    model_name = st.text_input(
+        "Gemini model",
+        value=os.getenv("GEMINI_MODEL", "gemini-flash-latest"),
+        help="Model ID sent to the Google Gen AI SDK when generation is enabled.",
+    )
     
     st.divider()
     st.header("🎛️ Tuning Parameters")
@@ -58,13 +63,20 @@ with st.sidebar:
     
     # We dynamically initialize/update RAG if it's missing or if chunk_size/overlap changed
     if st.session_state.rag is None or st.session_state.rag.chunk_size != chunk_size or st.session_state.rag.chunk_overlap != chunk_overlap:
-        st.session_state.rag = MinimalRAG(embedding_model=embedding_model, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+        st.session_state.rag = MinimalRAG(
+            embedding_model=embedding_model,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+            model_name=model_name,
+        )
         st.session_state.index_built = False # Force rebuild if settings change
-        
+
+    st.session_state.rag.model_name = model_name
     if api_key_input:
-        st.session_state.rag.set_api_key(api_key_input)
+        st.session_state.rag.set_api_key(api_key_input, model_name=model_name)
     else:
-        st.warning("Please enter a Gemini API Key to enable generation.")
+        st.session_state.rag.client = None
+        st.info("No API key: retrieval-only demo mode is active.")
         
     st.divider()
     
@@ -133,8 +145,6 @@ if st.session_state.index_built:
     if submit_button:
         if not query.strip():
             st.warning("Please enter a question.")
-        elif not st.session_state.rag.llm:
-            st.error("API Key not found or invalid. Please update it in the sidebar.")
         else:
             with st.spinner(f"Searching for answers... (Retrieving top {top_k} contexts)"):
                 retrieved_chunks_with_scores = st.session_state.rag.retrieve(query, top_k=top_k)
