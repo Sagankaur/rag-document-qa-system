@@ -2,6 +2,8 @@
 
 A compact retrieval-augmented generation project for asking questions about local PDF and text files. The application keeps document parsing, chunking, embeddings, and FAISS retrieval local. A Gemini API key is optional: without one, the interface still works as a retrieval-only evidence explorer.
 
+![Runtime screenshot of the Streamlit document upload interface](docs/screenshots/runtime-upload.png)
+
 ## What it demonstrates
 
 - Multi-file PDF and TXT ingestion
